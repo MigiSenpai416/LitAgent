@@ -1,0 +1,6 @@
+OPENROUTER_API_KEY=""
+OPENALEX_API_KEY=""
+# Optional: protect a private deployment's search endpoint.
+LITAGENT_ACCESS_TOKEN=""
+# Optional: enable external DOI lookups on https://www.sci-hub.in/.
+ENABLE_SCIHUB="false"
