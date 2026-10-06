@@ -11,9 +11,9 @@ import {
   FileText,
   GitBranch,
   Library,
+  Link2,
   LoaderCircle,
   Search,
-  Settings2,
   Sparkles,
   X,
 } from 'lucide-react';
@@ -26,24 +26,7 @@ import type {
 import { getConfig, streamSearch } from './api';
 import { exportPapers, readSaved } from './storage';
 import { getSciHubUrl } from '../shared/papers';
-
-const suggestions = [
-  {
-    category: 'EDUCATION',
-    query: 'How does generative AI affect critical thinking in students?',
-    terms: 'generative AI critical thinking students',
-  },
-  {
-    category: 'ENVIRONMENT',
-    query: 'Can urban green spaces improve mental health?',
-    terms: 'urban green space mental health',
-  },
-  {
-    category: 'TECHNOLOGY',
-    query: 'What makes retrieval-augmented generation more reliable?',
-    terms: 'retrieval augmented generation reliability',
-  },
-];
+import DiscoveryIntro from './DiscoveryIntro';
 
 function externalUrl(value: string | null): string | undefined {
   try {
@@ -204,6 +187,17 @@ function PaperCard({
           </span>
         </div>
         <div className="paper-links">
+          {doiUrl && (
+            <a
+              className="read-paper"
+              href={doiUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="Open this paper through doi.org"
+            >
+              <Link2 size={14} /> Try DOI <ArrowUpRight size={14} />
+            </a>
+          )}
           {fulltext && oaUrl && (
             <a
               className="read-paper"
@@ -243,13 +237,8 @@ function PaperCard({
 
 export default function App() {
   const [query, setQuery] = useState('');
-  const [mode, setMode] = useState<'citations' | 'fulltext'>('citations');
-  const [useAgent, setUseAgent] = useState(true);
-  const [useDecisions, setUseDecisions] = useState(false);
-  const [fromYear, setFromYear] = useState('');
   const [config, setConfig] = useState<ServiceConfig | null>(null);
   const [configError, setConfigError] = useState(false);
-  const [settings, setSettings] = useState(false);
   const [accessToken, setAccessToken] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [plan, setPlan] = useState<SearchPlan | null>(null);
@@ -307,8 +296,7 @@ export default function App() {
       return;
     }
     if (config?.accessProtected && !accessToken.trim()) {
-      setSettings(true);
-      setError('Enter your deployment access token in Search settings.');
+      setError('Enter your deployment access token below the search field.');
       return;
     }
     const abort = new AbortController();
@@ -323,13 +311,7 @@ export default function App() {
     setSort('relevance');
     try {
       await streamSearch(
-        {
-          query: value,
-          mode,
-          useAgent,
-          useDecisions,
-          fromYear: fromYear ? Number(fromYear) : null,
-        },
+        { query: value },
         accessToken.trim(),
         abort.signal,
         (event) => {
@@ -358,6 +340,15 @@ export default function App() {
     controller.current?.abort();
     setPlan(null);
   }
+  function focusSearch() {
+    searchRef.current?.focus({ preventScroll: true });
+    searchRef.current?.scrollIntoView({
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 'instant'
+        : 'smooth',
+      block: 'center',
+    });
+  }
   const papers = tab === 'saved' ? saved : result?.papers || [];
   const visible = papers
     .filter(
@@ -373,7 +364,7 @@ export default function App() {
           ? b.citations - a.citations
           : 0,
     );
-  const fulltext = tab === 'saved' || result?.mode === 'fulltext';
+  const fulltext = tab === 'saved';
   const hasResults = tab === 'saved' || result !== null;
 
   return (
@@ -402,35 +393,55 @@ export default function App() {
             )}
           </button>
         </nav>
-        <button
-          className={`settings-button ${settings ? 'active' : ''}`}
-          onClick={() => setSettings(!settings)}
-          aria-expanded={settings}
-          aria-label="Search settings"
-        >
-          <Settings2 size={17} />
-          <span>Search settings</span>
-        </button>
       </header>
 
-      <main>
+      <main className="main-content">
         {tab === 'discover' && (
           <>
             <section
               className={`hero ${hasResults || busy ? 'hero-small' : ''}`}
             >
-              <div className="eyebrow">
-                <span className="status-dot" /> A LITTLE CURIOSITY. A WORLD OF
-                RESEARCH.
+              <div className="hero-intro">
+                <div className="hero-copy">
+                  <div className="eyebrow">
+                    <span className="status-dot" /> A WORLD OF RESEARCH, WITHIN
+                    REACH
+                  </div>
+                  <h1>
+                    Follow your
+                    <br />
+                    <span>curiosity.</span>
+                  </h1>
+                  <p className="hero-description">
+                    Start with a question.
+                    <br />
+                    Find the papers that move it forward.
+                  </p>
+                </div>
+                <div className="hero-art" aria-hidden="true">
+                  <img
+                    src="https://picsum.photos/seed/literature/1920/1080"
+                    alt=""
+                  />
+                  <div className="orbit orbit-one" />
+                  <div className="orbit orbit-two" />
+                  <div className="research-sheet sheet-back">
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <div className="research-sheet sheet-front">
+                    <BookOpen size={28} strokeWidth={1.2} />
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                  </div>
+                  <span className="art-caption">
+                    An idea is just the beginning.
+                  </span>
+                </div>
               </div>
-              <h1>
-                Follow your <span>curiosity.</span>
-              </h1>
-              <p className="hero-description">
-                From a spark of an idea to the papers that matter.
-                <br />
-                Your research journey starts with a question.
-              </p>
               <form
                 className="search-box"
                 onSubmit={(event) => {
@@ -460,27 +471,20 @@ export default function App() {
                     }}
                   />
                 </div>
+                {config?.accessProtected && (
+                  <label className="token-label">
+                    Deployment access token
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      disabled={busy}
+                      value={accessToken}
+                      onChange={(event) => setAccessToken(event.target.value)}
+                      placeholder="Access token"
+                    />
+                  </label>
+                )}
                 <div className="search-box-bottom">
-                  <div className="mode-toggle" aria-label="Search mode">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className={mode === 'citations' ? 'selected' : ''}
-                      onClick={() => setMode('citations')}
-                      aria-pressed={mode === 'citations'}
-                    >
-                      <FileText size={14} /> Title & DOI
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      className={mode === 'fulltext' ? 'selected' : ''}
-                      onClick={() => setMode('fulltext')}
-                      aria-pressed={mode === 'fulltext'}
-                    >
-                      <BookOpen size={14} /> Read papers
-                    </button>
-                  </div>
                   {busy ? (
                     <button
                       type="button"
@@ -499,107 +503,15 @@ export default function App() {
               <div className="search-caption">
                 <span>
                   <Sparkles size={12} />{' '}
-                  {useAgent && config?.agent
+                  {config?.agent
                     ? 'Agent-assisted discovery'
                     : 'OpenAlex keyword search'}
                 </span>
-                <span className="caption-divider" />
-                <span>
-                  {mode === 'fulltext'
-                    ? config?.sciHubEnabled
-                      ? 'Open access & Sci-Hub lookups'
-                      : 'Public open-access papers'
-                    : 'Real papers. Traceable sources.'}
-                </span>
+                <span className="caption-divider" aria-hidden="true" />
+                <span>Real papers. Traceable sources.</span>
               </div>
             </section>
           </>
-        )}
-
-        {settings && (
-          <section className="settings-panel" aria-label="Search settings">
-            <div className="settings-title">
-              <h2>Make it your search</h2>
-              <button
-                className="icon-button"
-                aria-label="Close settings"
-                onClick={() => setSettings(false)}
-              >
-                <X size={17} />
-              </button>
-            </div>
-            <div className="settings-grid">
-              <label className="option-label">
-                <input
-                  type="checkbox"
-                  checked={useAgent}
-                  disabled={busy}
-                  onChange={(event) => setUseAgent(event.target.checked)}
-                />
-                <span>
-                  <strong>Understand my idea</strong>
-                  <small>Map concepts and expand queries with the agent.</small>
-                </span>
-              </label>
-              <label className="option-label">
-                <input
-                  type="checkbox"
-                  checked={useDecisions}
-                  disabled={busy}
-                  onChange={(event) => setUseDecisions(event.target.checked)}
-                />
-                <span>
-                  <strong>Check relevance with Jev</strong>
-                  <small>
-                    Score title and abstract matches; filter after searching.
-                  </small>
-                </span>
-              </label>
-              <label className="year-select">
-                Published since
-                <select
-                  disabled={busy}
-                  value={fromYear}
-                  onChange={(event) => setFromYear(event.target.value)}
-                >
-                  <option value="">Any time</option>
-                  {[
-                    ...new Set([
-                      new Date().getFullYear(),
-                      2025,
-                      2020,
-                      2015,
-                      2010,
-                      2000,
-                    ]),
-                  ].map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {config && (
-              <p className="config-note">
-                {config.agent
-                  ? `Agent: ${config.model} · Decisions: ${config.decisionModel}`
-                  : 'Add an OpenRouter key to the Worker environment to enable the agent and Jev. Keyword search is available now.'}
-              </p>
-            )}
-            {config?.accessProtected && (
-              <label className="token-label">
-                Deployment access token
-                <input
-                  type="password"
-                  autoComplete="off"
-                  value={accessToken}
-                  onChange={(event) => setAccessToken(event.target.value)}
-                  placeholder="Access token"
-                />
-              </label>
-            )}
-          </section>
         )}
 
         {configError && (
@@ -681,11 +593,7 @@ export default function App() {
                   <span className="toolbar-label">
                     {tab === 'saved'
                       ? 'Your saved papers'
-                      : result?.mode === 'fulltext'
-                        ? config?.sciHubEnabled
-                          ? 'Open-access links and DOI lookups'
-                          : 'Open-access sources available'
-                        : 'Full titles and DOI links'}
+                      : 'Full titles and DOI links'}
                   </span>
                 )}
               </div>
@@ -733,7 +641,7 @@ export default function App() {
                     ? 'Bookmark a paper to keep it here for later.'
                     : closeOnly
                       ? 'Turn off the relevance filter to explore the full set.'
-                      : 'Try fewer keywords, broaden the year range, or switch to Title & DOI.'}
+                      : 'Try fewer keywords or broaden the year range.'}
                 </p>
                 {tab === 'saved' && (
                   <button
@@ -756,78 +664,13 @@ export default function App() {
         )}
 
         {!busy && !hasResults && tab === 'discover' && (
-          <>
-            <section className="suggestions">
-              <div className="section-label">
-                <span>A PLACE TO START</span>
-                <span>Big questions, small first steps.</span>
-              </div>
-              <div className="suggestion-grid">
-                {suggestions.map((suggestion, index) => (
-                  <button
-                    className="suggestion-card"
-                    key={suggestion.category}
-                    onClick={() => {
-                      setQuery(
-                        config?.agent && useAgent
-                          ? suggestion.query
-                          : suggestion.terms,
-                      );
-                      searchRef.current?.focus();
-                    }}
-                  >
-                    <span className="suggestion-top">
-                      <span>{suggestion.category}</span>
-                      <span className="suggestion-icon">
-                        {index === 0 ? (
-                          <BookOpen size={17} />
-                        ) : index === 1 ? (
-                          <GitBranch size={17} />
-                        ) : (
-                          <Sparkles size={17} />
-                        )}
-                      </span>
-                    </span>
-                    <span className="suggestion-query">{suggestion.query}</span>
-                    <span className="suggestion-bottom">
-                      Explore this idea <ArrowUpRight size={15} />
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </section>
-            <section className="how-it-works">
-              <div>
-                <span className="step-number">01</span>
-                <h3>Bring an idea</h3>
-                <p>
-                  No perfect keywords needed.
-                  <br />
-                  Start with what you want to know.
-                </p>
-              </div>
-              <span className="step-connector" />
-              <div>
-                <span className="step-number">02</span>
-                <h3>Connect the concepts</h3>
-                <p>
-                  The agent maps your question
-                  <br />
-                  and finds paths into the literature.
-                </p>
-              </div>
-              <span className="step-connector" />
-              <div>
-                <span className="step-number">03</span>
-                <h3>Find your evidence</h3>
-                <p>
-                  Discover related studies, follow
-                  <br />
-                  DOIs, and read open-access papers.
-                </p>
-              </div>
-            </section>
-          </>
+          <DiscoveryIntro
+            onChoose={(idea, terms) => {
+              setQuery(config?.agent ? idea : terms);
+              focusSearch();
+            }}
+            onStart={focusSearch}
+          />
         )}
       </main>
       <footer>

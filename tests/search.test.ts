@@ -402,14 +402,178 @@ describe('Worker API', () => {
     expect(JSON.stringify(data)).not.toMatch(/private|secret/);
   });
 
+  it('enforces agent-on, Jev-off, any-year defaults despite client overrides', async () => {
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      if (String(url).includes('/chat/completions')) return routerPlan();
+      expect(new URL(url).origin).toBe('https://api.openalex.org');
+      expect(new URL(url).searchParams.get('filter')).toBe(
+        'is_retracted:false',
+      );
+      return Response.json({ results: [work()] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await worker.fetch(
+      request({
+        query: input.query,
+        useAgent: false,
+        useDecisions: true,
+        fromYear: 3000,
+        mode: 'fulltext',
+        ENABLE_AGENT: 'false',
+        ENABLE_JEV: 'true',
+      }),
+      { ...env, OPENROUTER_API_KEY: 'test' },
+    );
+    expect(response.status).toBe(200);
+    const events = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1).result).toMatchObject({
+      mode: 'citations',
+      plan: { source: 'agent' },
+      ranking: 'openalex',
+      warnings: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('enforces operator-selected planning, relevance, and year settings', async () => {
+    const configuredEnv = {
+      ...env,
+      OPENROUTER_API_KEY: 'test',
+      ENABLE_AGENT: 'false',
+      ENABLE_JEV: 'true',
+      SEARCH_FROM_YEAR: '2020',
+    };
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      if (String(url).includes('/alpha/decisions'))
+        return Response.json({
+          answers: { paper_0: { type: 'noul', noul: 0.92 } },
+        });
+      expect(new URL(url).origin).toBe('https://api.openalex.org');
+      expect(new URL(url).searchParams.get('filter')).toBe(
+        'is_retracted:false,from_publication_date:2020-01-01',
+      );
+      return Response.json({ results: [work()] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const config = await worker.fetch(
+      new Request('https://litagent.example/api/config'),
+      configuredEnv,
+    );
+    expect(await config.json()).toMatchObject({ agent: false });
+    const response = await worker.fetch(
+      request({
+        ...input,
+        useAgent: true,
+        useDecisions: false,
+        fromYear: 2010,
+      }),
+      configuredEnv,
+    );
+    const events = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1).result).toMatchObject({
+      plan: { source: 'keywords' },
+      ranking: 'jev',
+      papers: [{ score: 0.92 }],
+      warnings: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('makes no model calls when the operator disables both model features', async () => {
+    const fetchMock = vi.fn(async (url: string | URL) => {
+      expect(new URL(url).origin).toBe('https://api.openalex.org');
+      return Response.json({ results: [work()] });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const response = await worker.fetch(
+      request({ ...input, useAgent: true, useDecisions: true }),
+      {
+        ...env,
+        OPENROUTER_API_KEY: 'test',
+        ENABLE_AGENT: 'false',
+        ENABLE_JEV: 'false',
+      },
+    );
+    const events = (await response.text())
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line));
+    expect(events.at(-1).result).toMatchObject({
+      plan: { source: 'keywords' },
+      ranking: 'openalex',
+      warnings: [],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { ENABLE_AGENT: 'TRUE' },
+    { ENABLE_JEV: '1' },
+    { SEARCH_FROM_YEAR: 'not-a-year' },
+    { SEARCH_FROM_YEAR: '1799' },
+    { SEARCH_FROM_YEAR: String(new Date().getUTCFullYear() + 1) },
+  ])(
+    'rejects invalid operator configuration before provider calls: %j',
+    async (settings) => {
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      const configuredEnv = { ...env, ...settings };
+      const config = await worker.fetch(
+        new Request('https://litagent.example/api/config'),
+        configuredEnv,
+      );
+      expect(config.status).toBe(503);
+      const response = await worker.fetch(
+        request({ query: input.query }),
+        configuredEnv,
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error: expect.stringContaining('Invalid search configuration'),
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['1800', String(new Date().getUTCFullYear())])(
+    'accepts the publication-year boundary %s',
+    async (year) => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: URL) => {
+          expect(url.searchParams.get('filter')).toBe(
+            `is_retracted:false,from_publication_date:${year}-01-01`,
+          );
+          return Response.json({ results: [work()] });
+        }),
+      );
+      const response = await worker.fetch(request({ query: input.query }), {
+        ...env,
+        SEARCH_FROM_YEAR: year,
+      });
+      expect(response.status).toBe(200);
+      const events = (await response.text())
+        .trim()
+        .split('\n')
+        .map((line) => JSON.parse(line));
+      expect(events.at(-1).type).toBe('result');
+    },
+  );
+
   it('validates input before making provider calls', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     for (const body of [
       { query: 'a' },
       { query: 'x'.repeat(501) },
-      { query: 'research', mode: 'bad' },
-      { query: 'research', fromYear: 3000 },
+      { query: 123 },
+      null,
     ])
       expect((await worker.fetch(request(body), env)).status).toBe(400);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -615,13 +779,11 @@ describe('Sci-Hub lookups', () => {
     expect(result.papers[2].doi).toBeNull();
   });
 
-  it('does not allow client input to enable DOI lookups or change the default fulltext filter', async () => {
+  it('does not allow client input to enable DOI lookups or change citation mode', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: URL) => {
-        expect(url.searchParams.get('filter')).toContain(
-          'open_access.is_oa:true',
-        );
+        expect(url.searchParams.get('filter')).toBe('is_retracted:false');
         return Response.json({
           results: [
             work('W2', {
@@ -646,7 +808,8 @@ describe('Sci-Hub lookups', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    expect(events.at(-1).result.papers).toEqual([]);
+    expect(events.at(-1).result.mode).toBe('citations');
+    expect(events.at(-1).result.papers[0].doi).toBe('10.1234/closed');
   });
 });
 

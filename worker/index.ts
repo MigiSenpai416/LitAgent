@@ -4,6 +4,7 @@ import { getSciHubUrl } from '../shared/papers';
 import {
   DEFAULT_DECISION_MODEL,
   DEFAULT_MODEL,
+  getSearchSettings,
   search,
   ServiceError,
   type Env,
@@ -24,8 +25,14 @@ export default {
     const url = new URL(request.url);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
     if (url.pathname === '/api/config' && request.method === 'GET') {
+      let settings;
+      try {
+        settings = getSearchSettings(env);
+      } catch (error) {
+        return json({ error: (error as ServiceError).message }, 503);
+      }
       return json({
-        agent: Boolean(env.OPENROUTER_API_KEY),
+        agent: settings.useAgent && Boolean(env.OPENROUTER_API_KEY),
         model: env.OPENROUTER_MODEL || DEFAULT_MODEL,
         decisionModel: env.JEV_MODEL || DEFAULT_DECISION_MODEL,
         openalexKey: Boolean(env.OPENALEX_API_KEY),
@@ -105,12 +112,15 @@ export default {
     } catch {
       return json({ error: 'Invalid JSON request.' }, 400);
     }
-    const input = searchInputSchema.safeParse(body);
+    const input = searchInputSchema.pick({ query: true }).safeParse(body);
     if (!input.success)
-      return json(
-        { error: 'Use a query of 3–500 characters and valid search options.' },
-        400,
-      );
+      return json({ error: 'Use a query of 3–500 characters.' }, 400);
+    let settings;
+    try {
+      settings = getSearchSettings(env);
+    } catch (error) {
+      return json({ error: (error as ServiceError).message }, 503);
+    }
     const cancellation = new AbortController();
     const signal = AbortSignal.any([
       request.signal,
@@ -124,7 +134,12 @@ export default {
           if (!cancellation.signal.aborted)
             controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
         };
-        void search(input.data, env, emit, signal)
+        void search(
+          { ...input.data, ...settings, mode: 'citations' },
+          env,
+          emit,
+          signal,
+        )
           .then((result) => emit({ type: 'result', result }))
           .catch((error) => {
             emit({

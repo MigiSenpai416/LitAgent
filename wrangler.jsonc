@@ -11,6 +11,9 @@
   "vars": {
     "OPENROUTER_MODEL": "deepseek/deepseek-v4.1-flash",
     "JEV_MODEL": "typesafe/jev-1.13",
+    "ENABLE_AGENT": "true",
+    "ENABLE_JEV": "false",
+    "SEARCH_FROM_YEAR": "",
     "ENABLE_SCIHUB": "false",
   },
   "ratelimits": [

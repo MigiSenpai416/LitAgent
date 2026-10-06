@@ -16,6 +16,9 @@ export interface Env {
   JEV_MODEL?: string;
   LITAGENT_ACCESS_TOKEN?: string;
   ENABLE_SCIHUB?: string;
+  ENABLE_AGENT?: string;
+  ENABLE_JEV?: string;
+  SEARCH_FROM_YEAR?: string;
   SEARCH_RATE_LIMITER?: RateLimit;
 }
 
@@ -23,6 +26,46 @@ export const DEFAULT_MODEL = 'deepseek/deepseek-v4.1-flash';
 export const DEFAULT_DECISION_MODEL = 'typesafe/jev-1.13';
 
 export class ServiceError extends Error {}
+
+export function getSearchSettings(env: Env) {
+  const settings = z
+    .object({
+      useAgent: z.enum(['true', 'false']).default('true'),
+      useDecisions: z.enum(['true', 'false']).default('false'),
+      fromYear: z
+        .union([
+          z.literal(''),
+          z
+            .string()
+            .trim()
+            .regex(/^\d{4}$/),
+        ])
+        .default('')
+        .transform((year) => (year === '' ? null : Number(year)))
+        .pipe(
+          z
+            .number()
+            .int()
+            .min(1800)
+            .max(new Date().getUTCFullYear())
+            .nullable(),
+        ),
+    })
+    .safeParse({
+      useAgent: env.ENABLE_AGENT,
+      useDecisions: env.ENABLE_JEV,
+      fromYear: env.SEARCH_FROM_YEAR,
+    });
+  if (!settings.success)
+    throw new ServiceError(
+      'Invalid search configuration. Set ENABLE_AGENT and ENABLE_JEV to true or false, and SEARCH_FROM_YEAR to an empty string or a year from 1800 through the current year.',
+    );
+  return {
+    useAgent: settings.data.useAgent === 'true',
+    useDecisions: settings.data.useDecisions === 'true',
+    fromYear: settings.data.fromYear,
+  };
+}
 
 async function fetchJson(
   url: string | URL,

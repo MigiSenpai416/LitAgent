@@ -1,5 +1,10 @@
 OPENROUTER_API_KEY=""
 OPENALEX_API_KEY=""
+# Server-enforced search settings. Agent planning needs an OpenRouter key.
+ENABLE_AGENT="true"
+ENABLE_JEV="false"
+# Empty means any publication year; otherwise use a year such as 2020.
+SEARCH_FROM_YEAR=""
 # Optional: protect a private deployment's search endpoint.
 LITAGENT_ACCESS_TOKEN=""
 # Optional: enable external DOI lookups on https://www.sci-hub.in/.
