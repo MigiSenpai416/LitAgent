@@ -90,28 +90,11 @@ svg {
   text-decoration: none;
 }
 .brand-symbol {
-  position: relative;
   display: block;
-  width: 30px;
-  height: 32px;
-}
-.brand-symbol span:first-child,
-.brand-symbol span:last-child {
-  position: absolute;
-  border-left: 4px solid var(--accent);
-  border-bottom: 4px solid var(--accent);
-  top: 4px;
-}
-.brand-symbol span:first-child {
-  width: 16px;
-  height: 25px;
-  left: 3px;
-}
-.brand-symbol span:last-child {
-  width: 12px;
-  height: 17px;
-  left: 14px;
-  opacity: 0.5;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+  flex-shrink: 0;
 }
 .beta-tag {
   font-family: 'DM Sans', sans-serif;
@@ -1502,8 +1485,12 @@ select {
   .app-shell {
     padding: 0 15px;
   }
+  .brand {
+    font-size: 20px;
+  }
   .brand-symbol {
-    display: none;
+    width: 32px;
+    height: 32px;
   }
   nav button {
     padding-inline: 9px;

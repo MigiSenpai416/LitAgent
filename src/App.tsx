@@ -371,9 +371,13 @@ export default function App() {
     <div className="app-shell">
       <header className="site-header">
         <a className="brand" href="/" aria-label="LitAgent home">
-          <span className="brand-symbol">
-            <span /> <span />
-          </span>
+          <img
+            className="brand-symbol"
+            src="/cyrene-icon.png"
+            alt=""
+            width={40}
+            height={40}
+          />
           LitAgent<span className="beta-tag">BETA</span>
         </a>
         <nav aria-label="Main navigation">
