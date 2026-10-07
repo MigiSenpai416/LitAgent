@@ -25,7 +25,7 @@ import type {
 } from '../shared/types';
 import { getConfig, streamSearch } from './api';
 import { exportPapers, readSaved } from './storage';
-import { getSciHubUrl } from '../shared/papers';
+import { getDoiUrl, getSciHubUrl } from '../shared/papers';
 import DiscoveryIntro from './DiscoveryIntro';
 
 function externalUrl(value: string | null): string | undefined {
@@ -102,7 +102,7 @@ function PaperCard({
 }) {
   const [expanded, setExpanded] = useState(false);
   const oaUrl = externalUrl(paper.openAccessUrl);
-  const doiUrl = paper.doi ? `https://doi.org/${paper.doi}` : undefined;
+  const doiUrl = getDoiUrl(paper.doi) || undefined;
   const sciHubLink =
     sciHubEnabled && getSciHubUrl(paper.doi)
       ? `/api/paper/scihub?doi=${encodeURIComponent(paper.doi!)}`
@@ -153,9 +153,10 @@ function PaperCard({
             No abstract is available in OpenAlex.
           </p>
         )}
-        {fulltext && paper.abstract && paper.abstract.length > 260 && (
+        {fulltext && paper.abstract && (
           <button
             className="text-button abstract-toggle"
+            aria-expanded={expanded}
             onClick={() => setExpanded(!expanded)}
           >
             {expanded ? 'Less' : 'Read abstract'}{' '}
@@ -340,6 +341,10 @@ export default function App() {
     controller.current?.abort();
     setPlan(null);
   }
+  function changeTab(nextTab: 'discover' | 'saved') {
+    setTab(nextTab);
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
   function focusSearch() {
     searchRef.current?.focus({ preventScroll: true });
     searchRef.current?.scrollIntoView({
@@ -383,13 +388,15 @@ export default function App() {
         <nav aria-label="Main navigation">
           <button
             className={tab === 'discover' ? 'nav-active' : ''}
-            onClick={() => setTab('discover')}
+            aria-pressed={tab === 'discover'}
+            onClick={() => changeTab('discover')}
           >
             <Search size={15} /> Discover
           </button>
           <button
             className={tab === 'saved' ? 'nav-active' : ''}
-            onClick={() => setTab('saved')}
+            aria-pressed={tab === 'saved'}
+            onClick={() => changeTab('saved')}
           >
             <Bookmark size={15} /> My library{' '}
             {saved.length > 0 && (
@@ -462,13 +469,18 @@ export default function App() {
                     id="research-query"
                     ref={searchRef}
                     rows={2}
+                    enterKeyHint="search"
                     maxLength={500}
                     value={query}
                     onChange={(event) => setQuery(event.target.value)}
                     placeholder="What are you curious about? Try an idea, a topic, or a question…"
                     disabled={busy}
                     onKeyDown={(event) => {
-                      if (event.key === 'Enter' && !event.shiftKey) {
+                      if (
+                        event.key === 'Enter' &&
+                        !event.shiftKey &&
+                        !event.nativeEvent.isComposing
+                      ) {
                         event.preventDefault();
                         void runSearch();
                       }
@@ -645,12 +657,12 @@ export default function App() {
                     ? 'Bookmark a paper to keep it here for later.'
                     : closeOnly
                       ? 'Turn off the relevance filter to explore the full set.'
-                      : 'Try fewer keywords or broaden the year range.'}
+                      : 'Try fewer keywords or a broader research idea.'}
                 </p>
                 {tab === 'saved' && (
                   <button
                     className="text-button"
-                    onClick={() => setTab('discover')}
+                    onClick={() => changeTab('discover')}
                   >
                     Discover papers <ArrowRight size={15} />
                   </button>

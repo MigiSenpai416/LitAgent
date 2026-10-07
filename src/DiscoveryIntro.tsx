@@ -99,21 +99,25 @@ export default function DiscoveryIntro({
             },
           },
         );
-        const cards = gsap.utils.toArray<HTMLElement>('.workflow-card');
-        cards.slice(0, -1).forEach((card, index) => {
-          gsap.to(card, {
-            scale: 0.94,
-            opacity: 0.45,
-            ease: 'none',
-            scrollTrigger: {
-              trigger: cards[index + 1],
-              start: 'top 65%',
-              end: 'top 25%',
-              scrub: true,
-            },
-          });
-        });
       });
+      media.add(
+        '(min-width: 701px) and (min-height: 601px) and (prefers-reduced-motion: no-preference)',
+        () => {
+          const cards = gsap.utils.toArray<HTMLElement>('.workflow-card');
+          cards.slice(0, -1).forEach((card, index) => {
+            gsap.to(card, {
+              scale: 0.94,
+              ease: 'none',
+              scrollTrigger: {
+                trigger: cards[index + 1],
+                start: 'top 65%',
+                end: 'top 25%',
+                scrub: true,
+              },
+            });
+          });
+        },
+      );
       return () => media.revert();
     },
     { scope: container },

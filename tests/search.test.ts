@@ -10,7 +10,7 @@ import {
 import { searchInputSchema, type Work } from '../worker/schema';
 import { streamSearch } from '../src/api';
 import type { SearchEvent } from '../shared/types';
-import { getSciHubUrl } from '../shared/papers';
+import { getDoiUrl, getSciHubUrl } from '../shared/papers';
 
 const env = { ASSETS: { fetch: vi.fn() } } as unknown as Env;
 const input = searchInputSchema.parse({
@@ -68,6 +68,21 @@ function request(body: unknown, headers: Record<string, string> = {}) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe('paper metadata', () => {
+  it('preserves DOI identifiers in resolver links, including reserved characters', () => {
+    expect(getDoiUrl('10.1038/s41586-021-03819-2')).toBe(
+      'https://doi.org/10.1038/s41586-021-03819-2',
+    );
+    const doi = '10.1234/chapter/a?b#c%20';
+    const url = new URL(getDoiUrl(doi)!);
+    expect(url.origin).toBe('https://doi.org');
+    expect(decodeURIComponent(url.pathname.slice(1))).toBe(doi);
+    expect(url.search).toBe('');
+    expect(url.hash).toBe('');
+    expect(getDoiUrl(null)).toBeNull();
+    expect(getDoiUrl('not-a-doi')).toBeNull();
+    expect(getDoiUrl('10.1234/../about')).toBeNull();
+  });
+
   it('reconstructs abstracts, preserves full titles and DOI, and selects only open-access locations', () => {
     const paper = normalizeWork(work());
     expect(paper.title).toBe('Urban green spaces and mental wellbeing');
