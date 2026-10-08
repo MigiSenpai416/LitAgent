@@ -1,20 +1,5 @@
 import { z } from 'zod';
-
-export const searchInputSchema = z.object({
-  query: z.string().trim().min(3).max(500),
-  mode: z.enum(['citations', 'fulltext']).default('citations'),
-  useAgent: z.boolean().default(true),
-  useDecisions: z.boolean().default(false),
-  fromYear: z
-    .number()
-    .int()
-    .min(1800)
-    .max(new Date().getUTCFullYear())
-    .nullable()
-    .default(null),
-});
-
-export type SearchInput = z.infer<typeof searchInputSchema>;
+import { MAX_SEARCH_ROUNDS } from '../shared/types';
 
 export const planSchema = z.object({
   question: z.string().trim().min(3).max(700),
@@ -29,6 +14,46 @@ export const planSchema = z.object({
     .max(6),
   queries: z.array(z.string().trim().min(2).max(250)).min(1).max(3),
 });
+
+const instructionsSchema = z.string().trim().min(3).max(500);
+
+export const refinementSchema = z.object({
+  instructions: instructionsSchema,
+  history: z
+    .array(
+      z.object({
+        instructions: instructionsSchema.nullable(),
+        plan: planSchema.extend({
+          source: z.enum(['agent', 'keywords']),
+          queries: z.array(z.string().trim().min(2).max(500)).min(1).max(3),
+        }),
+        queriesSearched: z.array(z.string().trim().min(2).max(500)).max(3),
+        retrieved: z.number().int().nonnegative(),
+        returned: z.number().int().min(0).max(40),
+        sampleTitles: z.array(z.string().trim().min(1).max(200)).max(5),
+        warnings: z.array(z.string().max(500)).max(10),
+      }),
+    )
+    .min(1)
+    .max(MAX_SEARCH_ROUNDS - 1),
+});
+
+export const searchInputSchema = z.object({
+  query: z.string().trim().min(3).max(500),
+  refinement: refinementSchema.optional(),
+  mode: z.enum(['citations', 'fulltext']).default('citations'),
+  useAgent: z.boolean().default(true),
+  useDecisions: z.boolean().default(false),
+  fromYear: z
+    .number()
+    .int()
+    .min(1800)
+    .max(new Date().getUTCFullYear())
+    .nullable()
+    .default(null),
+});
+
+export type SearchInput = z.infer<typeof searchInputSchema>;
 
 const locationSchema = z.object({
   is_oa: z.boolean().optional(),

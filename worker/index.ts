@@ -87,16 +87,16 @@ export default {
     if (!request.headers.get('Content-Type')?.includes('application/json'))
       return json({ error: 'Send an application/json request.' }, 415);
     let body: unknown;
+    let length = 0;
     try {
       const reader = request.body?.getReader();
       if (!reader) return json({ error: 'A search request is required.' }, 400);
-      let length = 0;
       const chunks: Uint8Array[] = [];
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         length += value.byteLength;
-        if (length > 8192) {
+        if (length > 512 * 1024) {
           await reader.cancel();
           return json({ error: 'Search request is too large.' }, 413);
         }
@@ -112,9 +112,25 @@ export default {
     } catch {
       return json({ error: 'Invalid JSON request.' }, 400);
     }
-    const input = searchInputSchema.pick({ query: true }).safeParse(body);
+    if (
+      length > 8192 &&
+      !(body && typeof body === 'object' && 'refinement' in body)
+    )
+      return json({ error: 'Search request is too large.' }, 413);
+    const input = searchInputSchema
+      .pick({ query: true, refinement: true })
+      .safeParse(body);
     if (!input.success)
-      return json({ error: 'Use a query of 3–500 characters.' }, 400);
+      return json(
+        {
+          error: input.error.issues.some(
+            (issue) => issue.path[0] === 'refinement',
+          )
+            ? 'Use refinement feedback of 3–500 characters and a valid search history.'
+            : 'Use a query of 3–500 characters.',
+        },
+        400,
+      );
     let settings;
     try {
       settings = getSearchSettings(env);

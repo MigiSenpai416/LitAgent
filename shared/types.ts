@@ -5,6 +5,28 @@ export interface SearchPlan {
   source: 'agent' | 'keywords';
 }
 
+export const MAX_SEARCH_ROUNDS = 20;
+
+export interface SearchRound {
+  instructions: string | null;
+  plan: SearchPlan;
+  queriesSearched: string[];
+  retrieved: number;
+  returned: number;
+  sampleTitles: string[];
+  warnings: string[];
+}
+
+export interface SearchRefinement {
+  instructions: string;
+  history: SearchRound[];
+}
+
+export interface SearchRequest {
+  query: string;
+  refinement?: SearchRefinement;
+}
+
 export interface Paper {
   id: string;
   title: string;

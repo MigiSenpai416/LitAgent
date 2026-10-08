@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import type { SearchEvent, ServiceConfig } from '../shared/types';
+import type {
+  SearchEvent,
+  SearchRequest,
+  ServiceConfig,
+} from '../shared/types';
 
 export async function getConfig(signal: AbortSignal): Promise<ServiceConfig> {
   const response = await fetch('/api/config', { signal });
@@ -17,7 +21,7 @@ export async function getConfig(signal: AbortSignal): Promise<ServiceConfig> {
 }
 
 export async function streamSearch(
-  input: unknown,
+  input: SearchRequest,
   token: string,
   signal: AbortSignal,
   onEvent: (event: SearchEvent) => void,

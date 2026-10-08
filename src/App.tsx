@@ -20,12 +20,16 @@ import {
 import type {
   Paper,
   SearchPlan,
+  SearchRefinement,
   SearchResult,
+  SearchRound,
   ServiceConfig,
 } from '../shared/types';
+import { MAX_SEARCH_ROUNDS } from '../shared/types';
 import { getConfig, streamSearch } from './api';
 import { exportPapers, readSaved } from './storage';
 import { getDoiUrl, getSciHubUrl } from '../shared/papers';
+import { searchRound } from './search-context';
 import DiscoveryIntro from './DiscoveryIntro';
 
 function externalUrl(value: string | null): string | undefined {
@@ -243,6 +247,9 @@ export default function App() {
   const [accessToken, setAccessToken] = useState('');
   const [result, setResult] = useState<SearchResult | null>(null);
   const [plan, setPlan] = useState<SearchPlan | null>(null);
+  const [refinementInput, setRefinementInput] = useState('');
+  const [refinementError, setRefinementError] = useState('');
+  const [searchHistory, setSearchHistory] = useState<SearchRound[]>([]);
   const [busy, setBusy] = useState(false);
   const [phase, setPhase] = useState('');
   const [error, setError] = useState('');
@@ -254,6 +261,7 @@ export default function App() {
   const controller = useRef<AbortController | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchRef = useRef<HTMLTextAreaElement>(null);
+  const refinementRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     const abort = new AbortController();
@@ -289,47 +297,70 @@ export default function App() {
     }
   }
 
-  async function runSearch(value = query) {
-    if (busy) return;
+  async function runSearch(value = query, refinement?: SearchRefinement) {
+    if (busy || controller.current) return;
     if (value.trim().length < 3) {
       setError('Describe your topic in at least 3 characters.');
       searchRef.current?.focus();
       return;
     }
     if (config?.accessProtected && !accessToken.trim()) {
-      setError('Enter your deployment access token below the search field.');
+      const message =
+        'Enter your deployment access token below the search field.';
+      if (refinement) setRefinementError(message);
+      else setError(message);
       return;
     }
     const abort = new AbortController();
     controller.current = abort;
-    setQuery(value);
+    if (!refinement) {
+      setQuery(value);
+      setResult(null);
+      setPlan(null);
+      setSearchHistory([]);
+      setRefinementInput('');
+    }
     setBusy(true);
     setError('');
-    setResult(null);
-    setPlan(null);
+    setRefinementError('');
     setTab('discover');
-    setCloseOnly(false);
-    setSort('relevance');
+    const completion: { result?: SearchResult } = {};
+    let succeeded = false;
     try {
       await streamSearch(
-        { query: value },
+        { query: value.trim(), ...(refinement ? { refinement } : {}) },
         accessToken.trim(),
         abort.signal,
         (event) => {
+          if (abort.signal.aborted) return;
           if (event.type === 'phase') setPhase(event.message);
           if (event.type === 'plan') setPlan(event.plan);
-          if (event.type === 'result') setResult(event.result);
+          if (event.type === 'result') completion.result = event.result;
         },
       );
+      if (abort.signal.aborted || !completion.result) return;
+      setResult(completion.result);
+      setPlan(completion.result.plan);
+      setSearchHistory([
+        ...(refinement?.history || []),
+        searchRound(completion.result, refinement?.instructions || null),
+      ]);
+      setRefinementInput('');
+      setCloseOnly(false);
+      setSort('relevance');
+      succeeded = true;
     } catch (err) {
-      if (!abort.signal.aborted)
-        setError(
+      if (!abort.signal.aborted) {
+        const message =
           err instanceof Error
             ? err.message
-            : 'Search failed. Please try again.',
-        );
+            : 'Search failed. Please try again.';
+        if (refinement) setRefinementError(message);
+        else setError(message);
+      }
     } finally {
       if (controller.current === abort) {
+        if (refinement && !succeeded) setPlan(result?.plan || null);
         controller.current = null;
         setBusy(false);
         setPhase('');
@@ -339,7 +370,24 @@ export default function App() {
 
   function cancelSearch() {
     controller.current?.abort();
-    setPlan(null);
+    setPlan(result?.plan || null);
+  }
+
+  function refineSearch() {
+    if (!result || busy || controller.current) return;
+    const instructions = refinementInput.trim();
+    if (instructions.length < 3 || instructions.length > 500) {
+      setRefinementError('Describe the change you want in 3–500 characters.');
+      refinementRef.current?.focus();
+      return;
+    }
+    if (searchHistory.length >= MAX_SEARCH_ROUNDS) {
+      setRefinementError(
+        'Start a new search above to continue exploring this topic.',
+      );
+      return;
+    }
+    void runSearch(result.query, { instructions, history: searchHistory });
   }
   function changeTab(nextTab: 'discover' | 'saved') {
     setTab(nextTab);
@@ -559,7 +607,10 @@ export default function App() {
           ))}
 
         {hasResults && (
-          <section className="results-section">
+          <section
+            className="results-section"
+            aria-busy={tab === 'discover' && busy}
+          >
             <div className="results-heading">
               <div>
                 {tab === 'saved' ? (
@@ -594,6 +645,118 @@ export default function App() {
                 <ArrowDownToLine size={14} /> Export CSV
               </button>
             </div>
+            {tab === 'discover' && result && (
+              <form
+                className="search-box refinement-box"
+                aria-labelledby="refinement-heading"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  refineSearch();
+                }}
+              >
+                <div className="refinement-heading">
+                  <h3 id="refinement-heading">
+                    <Sparkles size={17} /> Refine this search
+                  </h3>
+                  {searchHistory.length > 1 && (
+                    <span className="small-tag">
+                      {searchHistory.length - 1}{' '}
+                      {searchHistory.length === 2
+                        ? 'refinement'
+                        : 'refinements'}{' '}
+                      applied
+                    </span>
+                  )}
+                </div>
+                <p id="refinement-help" className="refinement-help">
+                  {searchHistory.length >= MAX_SEARCH_ROUNDS
+                    ? 'Start a new search above to keep exploring this topic.'
+                    : 'Tell us what’s missing or where to focus. We’ll build on your original idea and every previous refinement.'}
+                </p>
+                <label htmlFor="refinement-input" className="sr-only">
+                  How would you like to refine this search?
+                </label>
+                <textarea
+                  id="refinement-input"
+                  ref={refinementRef}
+                  aria-describedby={`refinement-help${refinementError ? ' refinement-error' : ''}`}
+                  rows={2}
+                  maxLength={500}
+                  enterKeyHint="search"
+                  value={refinementInput}
+                  onChange={(event) => setRefinementInput(event.target.value)}
+                  placeholder="e.g. Focus on adolescents, or include longitudinal studies…"
+                  disabled={busy || searchHistory.length >= MAX_SEARCH_ROUNDS}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      refineSearch();
+                    }
+                  }}
+                />
+                {refinementError && (
+                  <div
+                    className="message error"
+                    role="alert"
+                    id="refinement-error"
+                  >
+                    {refinementError}
+                  </div>
+                )}
+                <div className="search-box-bottom refinement-bottom">
+                  <details className="search-history">
+                    <summary>
+                      Search history · {searchHistory.length}{' '}
+                      {searchHistory.length === 1 ? 'search' : 'searches'}
+                    </summary>
+                    <ol>
+                      {searchHistory.map((round, index) => (
+                        <li key={index}>
+                          <strong>
+                            {index === 0
+                              ? 'Original idea'
+                              : `Refinement ${index}`}
+                          </strong>
+                          <p>{round.instructions || result.query}</p>
+                          <span>{round.plan.question}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </details>
+                  <div className="refinement-actions">
+                    {busy && (
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={cancelSearch}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      className="search-submit"
+                      type="submit"
+                      disabled={
+                        busy ||
+                        refinementInput.trim().length < 3 ||
+                        searchHistory.length >= MAX_SEARCH_ROUNDS
+                      }
+                    >
+                      {busy ? 'Refining…' : 'Refine this search'}
+                      {busy ? (
+                        <LoaderCircle size={17} className="spinning" />
+                      ) : (
+                        <ArrowRight size={17} />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            )}
             <div className="results-toolbar">
               <div>
                 {tab === 'discover' && result?.ranking === 'jev' ? (
@@ -657,7 +820,7 @@ export default function App() {
                     ? 'Bookmark a paper to keep it here for later.'
                     : closeOnly
                       ? 'Turn off the relevance filter to explore the full set.'
-                      : 'Try fewer keywords or a broader research idea.'}
+                      : 'Use the refinement box above to try a broader idea or a more specific focus.'}
                 </p>
                 {tab === 'saved' && (
                   <button

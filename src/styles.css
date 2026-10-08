@@ -927,6 +927,87 @@ select {
   line-height: 1.7;
   margin: 0;
 }
+.refinement-box {
+  margin-top: 25px;
+  box-shadow: none;
+}
+.refinement-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.refinement-heading h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 16px;
+  font-weight: 550;
+  margin: 0;
+}
+.refinement-heading svg {
+  color: var(--accent);
+}
+.refinement-help {
+  margin: 10px 0 17px;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.refinement-box textarea {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #111922;
+  font-size: 16px;
+  min-height: 90px;
+  resize: vertical;
+}
+.refinement-box textarea:focus-visible {
+  border-color: #7ea5c3;
+}
+.refinement-bottom {
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+.refinement-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 14px;
+  margin-left: auto;
+}
+.search-history {
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 0;
+  flex: 1 1 260px;
+}
+.search-history summary {
+  cursor: pointer;
+  padding: 13px 0;
+  min-height: 44px;
+  width: fit-content;
+}
+.search-history ol {
+  padding-left: 20px;
+  margin: 8px 0 0;
+}
+.search-history li {
+  padding: 0 12px 18px 4px;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+}
+.search-history strong {
+  color: #cfdee9;
+  font-weight: 550;
+}
+.search-history p {
+  margin: 4px 0;
+  color: #d7e5f0;
+}
 .export-button {
   display: flex;
   align-items: center;
@@ -1336,6 +1417,9 @@ select {
     font-size: 16px;
     min-height: 112px;
   }
+  .refinement-box textarea {
+    min-height: 112px;
+  }
   .search-input-row {
     gap: 10px;
   }
@@ -1581,6 +1665,15 @@ select {
   .search-box-bottom {
     flex-direction: column;
     align-items: stretch;
+  }
+  .search-history {
+    flex-basis: auto;
+  }
+  .refinement-actions {
+    margin-left: 0;
+  }
+  .refinement-actions .search-submit {
+    flex: 1;
   }
   .search-submit {
     justify-content: space-between;
