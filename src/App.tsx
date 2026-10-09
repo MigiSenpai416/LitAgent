@@ -980,21 +980,14 @@ export default function App() {
           LitAgent <span>Built for curious minds.</span>
         </span>
         <span>
-          Research from{' '}
+          Made with ❤️ by Engr. Miguel Ricaplaza
+          <span className="footer-separator">/</span>
           <a
-            href="https://openalex.org"
+            href="https://github.com/MigiSenpai416"
             target="_blank"
             rel="noopener noreferrer"
           >
-            OpenAlex <ArrowUpRight size={11} />
-          </a>
-          <span className="footer-separator">/</span>AI via{' '}
-          <a
-            href="https://openrouter.ai"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            OpenRouter <ArrowUpRight size={11} />
+            Github <ArrowUpRight size={11} />
           </a>
         </span>
       </footer>
