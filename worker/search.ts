@@ -6,7 +6,7 @@ import type {
   SearchResult,
 } from '../shared/types';
 import { planSchema, worksSchema, type SearchInput, type Work } from './schema';
-import { getSciHubUrl } from '../shared/papers';
+import { deduplicatePapers, getSciHubUrl } from '../shared/papers';
 
 export interface Env {
   ASSETS: Fetcher;
@@ -266,10 +266,12 @@ async function retrieve(
   input: SearchInput,
   env: Env,
   signal: AbortSignal,
-): Promise<Paper[]> {
+  cursor = '*',
+): Promise<{ papers: Paper[]; cursor: string | null }> {
   const url = new URL('https://api.openalex.org/works');
   url.searchParams.set('search', query);
-  url.searchParams.set('per_page', '20');
+  url.searchParams.set('per_page', '100');
+  url.searchParams.set('cursor', cursor);
   const filters = ['is_retracted:false'];
   const sciHubEnabled = env.ENABLE_SCIHUB === 'true';
   if (input.mode === 'fulltext' && !sciHubEnabled)
@@ -291,8 +293,15 @@ async function retrieve(
     'OpenAlex',
     signal,
   );
-  const works = worksSchema.parse(data).results;
-  return works
+  const page = worksSchema.parse(data);
+  const nextCursor = page.results.length
+    ? page.meta?.next_cursor || null
+    : null;
+  if (nextCursor === cursor)
+    throw new ServiceError(
+      'OpenAlex returned a repeated page cursor. Please try again.',
+    );
+  const papers = page.results
     .filter((work) => !work.is_retracted && work.display_name)
     .map(normalizeWork)
     .filter(
@@ -301,6 +310,7 @@ async function retrieve(
         paper.openAccessUrl !== null ||
         (sciHubEnabled && getSciHubUrl(paper.doi) !== null),
     );
+  return { papers, cursor: nextCursor };
 }
 
 async function rankPapers(
@@ -378,19 +388,24 @@ export async function search(
 ): Promise<SearchResult> {
   const started = Date.now();
   const warnings: string[] = [];
-  if (input.refinement && (!input.useAgent || !env.OPENROUTER_API_KEY))
+  if (
+    input.refinement &&
+    !input.pagination &&
+    (!input.useAgent || !env.OPENROUTER_API_KEY)
+  )
     throw new ServiceError(
       'Search refinement is unavailable because the research agent is not enabled. Your previous results are still available.',
     );
-  let plan = keywordPlan(input.query);
-  emit({
-    type: 'phase',
-    phase: 'planning',
-    message: input.refinement
-      ? 'Refining your research idea with your search history and feedback…'
-      : 'Making sense of your research idea…',
-  });
-  if (input.useAgent && env.OPENROUTER_API_KEY) {
+  let plan = input.pagination?.plan || keywordPlan(input.query);
+  if (!input.pagination)
+    emit({
+      type: 'phase',
+      phase: 'planning',
+      message: input.refinement
+        ? 'Refining your research idea with your search history and feedback…'
+        : 'Making sense of your research idea…',
+    });
+  if (!input.pagination && input.useAgent && env.OPENROUTER_API_KEY) {
     try {
       plan = await createPlan(input, env, signal);
     } catch (error) {
@@ -407,26 +422,31 @@ export async function search(
           : 'The agent returned an invalid plan. Using your original keywords.',
       );
     }
-  } else if (input.useAgent)
+  } else if (!input.pagination && input.useAgent)
     warnings.push(
       'OpenRouter is not configured. Using your original keywords.',
     );
   if (signal.aborted)
     throw new ServiceError('Search was cancelled or timed out.');
   emit({ type: 'plan', plan });
+  const paths =
+    input.pagination?.paths ||
+    plan.queries.map((query) => ({ query, cursor: '*' }));
   emit({
     type: 'phase',
     phase: 'searching',
-    message: `Searching OpenAlex with ${plan.queries.length} ${plan.queries.length === 1 ? 'query' : 'queries'}…`,
+    message: input.pagination
+      ? 'Loading more papers from your existing search paths…'
+      : `Searching OpenAlex with ${paths.length} ${paths.length === 1 ? 'query' : 'queries'}…`,
   });
   const batches = await Promise.allSettled(
-    plan.queries.map((query) => retrieve(query, input, env, signal)),
+    paths.map((path) => retrieve(path.query, input, env, signal, path.cursor)),
   );
   if (signal.aborted)
     throw new ServiceError('Search was cancelled or timed out.');
   const successful = batches.flatMap((batch, index) =>
     batch.status === 'fulfilled'
-      ? [{ query: plan.queries[index], papers: batch.value }]
+      ? [{ query: paths[index].query, papers: batch.value.papers }]
       : [],
   );
   if (!successful.length) {
@@ -441,23 +461,22 @@ export async function search(
     warnings.push(
       'Some OpenAlex searches failed. Results include the successful searches only.',
     );
-  const unique = new Map<string, Paper>();
-  const doiIds = new Set<string>();
+  const nextPaths = batches.flatMap((batch, index) =>
+    batch.status === 'rejected'
+      ? [paths[index]]
+      : batch.value.cursor
+        ? [{ query: paths[index].query, cursor: batch.value.cursor }]
+        : [],
+  );
+  const collected: Paper[] = [];
   const maxLength = Math.max(...successful.map((batch) => batch.papers.length));
   for (let i = 0; i < maxLength; i++) {
     for (const batch of successful) {
       const paper = batch.papers[i];
-      if (
-        !paper ||
-        unique.has(paper.id) ||
-        (paper.doi && doiIds.has(paper.doi.toLowerCase()))
-      )
-        continue;
-      unique.set(paper.id, paper);
-      if (paper.doi) doiIds.add(paper.doi.toLowerCase());
+      if (paper) collected.push(paper);
     }
   }
-  let papers = [...unique.values()].slice(0, 40);
+  let papers = deduplicatePapers(collected);
   let ranking: SearchResult['ranking'] = 'openalex';
   if (input.useDecisions && papers.length) {
     if (env.OPENROUTER_API_KEY) {
@@ -467,7 +486,22 @@ export async function search(
         message: 'Checking how closely each paper matches your idea…',
       });
       try {
-        papers = await rankPapers(papers, input, plan, env, signal);
+        const ranked = await Promise.allSettled(
+          Array.from({ length: Math.ceil(papers.length / 40) }, (_, index) =>
+            rankPapers(
+              papers.slice(index * 40, (index + 1) * 40),
+              input,
+              plan,
+              env,
+              signal,
+            ),
+          ),
+        );
+        const failed = ranked.find((batch) => batch.status === 'rejected');
+        if (failed?.status === 'rejected') throw failed.reason;
+        papers = ranked
+          .flatMap((batch) => (batch.status === 'fulfilled' ? batch.value : []))
+          .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
         ranking = 'jev';
       } catch (error) {
         if (signal.aborted) throw error;
@@ -489,10 +523,11 @@ export async function search(
     mode: input.mode,
     plan,
     papers,
-    retrieved: unique.size,
+    retrieved: papers.length,
     queriesSearched: successful.map((batch) => batch.query),
     ranking,
     warnings,
     elapsedMs: Date.now() - started,
+    pagination: nextPaths.length ? { plan, paths: nextPaths } : null,
   };
 }

@@ -17,19 +17,44 @@ export const planSchema = z.object({
 
 const instructionsSchema = z.string().trim().min(3).max(500);
 
+const searchPlanSchema = planSchema.extend({
+  source: z.enum(['agent', 'keywords']),
+  queries: z.array(z.string().trim().min(2).max(500)).min(1).max(3),
+});
+
+export const paginationSchema = z
+  .object({
+    plan: searchPlanSchema,
+    paths: z
+      .array(
+        z.object({
+          query: z.string().trim().min(2).max(500),
+          cursor: z.string().trim().min(1).max(4096),
+        }),
+      )
+      .min(1)
+      .max(3),
+  })
+  .refine(
+    (pagination) =>
+      pagination.paths.every((path) =>
+        pagination.plan.queries.includes(path.query),
+      ) &&
+      new Set(pagination.paths.map((path) => path.query)).size ===
+        pagination.paths.length,
+    'Pagination paths must belong to the search plan and be distinct.',
+  );
+
 export const refinementSchema = z.object({
   instructions: instructionsSchema,
   history: z
     .array(
       z.object({
         instructions: instructionsSchema.nullable(),
-        plan: planSchema.extend({
-          source: z.enum(['agent', 'keywords']),
-          queries: z.array(z.string().trim().min(2).max(500)).min(1).max(3),
-        }),
+        plan: searchPlanSchema,
         queriesSearched: z.array(z.string().trim().min(2).max(500)).max(3),
         retrieved: z.number().int().nonnegative(),
-        returned: z.number().int().min(0).max(40),
+        returned: z.number().int().nonnegative(),
         sampleTitles: z.array(z.string().trim().min(1).max(200)).max(5),
         warnings: z.array(z.string().max(500)).max(10),
       }),
@@ -41,6 +66,7 @@ export const refinementSchema = z.object({
 export const searchInputSchema = z.object({
   query: z.string().trim().min(3).max(500),
   refinement: refinementSchema.optional(),
+  pagination: paginationSchema.optional(),
   mode: z.enum(['citations', 'fulltext']).default('citations'),
   useAgent: z.boolean().default(true),
   useDecisions: z.boolean().default(false),
@@ -66,6 +92,9 @@ const locationSchema = z.object({
 });
 
 export const worksSchema = z.object({
+  meta: z
+    .object({ next_cursor: z.string().max(4096).nullable().optional() })
+    .optional(),
   results: z.array(
     z.object({
       id: z.string().regex(/^https:\/\/openalex.org\/W\d+$/),

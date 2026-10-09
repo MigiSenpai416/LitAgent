@@ -114,20 +114,26 @@ export default {
     }
     if (
       length > 8192 &&
-      !(body && typeof body === 'object' && 'refinement' in body)
+      !(
+        body &&
+        typeof body === 'object' &&
+        ('refinement' in body || 'pagination' in body)
+      )
     )
       return json({ error: 'Search request is too large.' }, 413);
     const input = searchInputSchema
-      .pick({ query: true, refinement: true })
+      .pick({ query: true, refinement: true, pagination: true })
       .safeParse(body);
     if (!input.success)
       return json(
         {
           error: input.error.issues.some(
-            (issue) => issue.path[0] === 'refinement',
+            (issue) => issue.path[0] === 'pagination',
           )
-            ? 'Use refinement feedback of 3–500 characters and a valid search history.'
-            : 'Use a query of 3–500 characters.',
+            ? 'Use a valid search plan and page cursors to load more papers.'
+            : input.error.issues.some((issue) => issue.path[0] === 'refinement')
+              ? 'Use refinement feedback of 3–500 characters and a valid search history.'
+              : 'Use a query of 3–500 characters.',
         },
         400,
       );

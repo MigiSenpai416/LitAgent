@@ -29,7 +29,7 @@ import { MAX_SEARCH_ROUNDS } from '../shared/types';
 import { getConfig, streamSearch } from './api';
 import { exportPapers, readSaved } from './storage';
 import { getDoiUrl, getSciHubUrl } from '../shared/papers';
-import { searchRound } from './search-context';
+import { mergeSearchResults, searchRound } from './search-context';
 import DiscoveryIntro from './DiscoveryIntro';
 
 function externalUrl(value: string | null): string | undefined {
@@ -250,7 +250,11 @@ export default function App() {
   const [refinementInput, setRefinementInput] = useState('');
   const [refinementError, setRefinementError] = useState('');
   const [searchHistory, setSearchHistory] = useState<SearchRound[]>([]);
+  const [currentRefinement, setCurrentRefinement] =
+    useState<SearchRefinement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [pageError, setPageError] = useState('');
   const [phase, setPhase] = useState('');
   const [error, setError] = useState('');
   const [tab, setTab] = useState<'discover' | 'saved'>('discover');
@@ -323,6 +327,7 @@ export default function App() {
     setBusy(true);
     setError('');
     setRefinementError('');
+    setPageError('');
     setTab('discover');
     const completion: { result?: SearchResult } = {};
     let succeeded = false;
@@ -341,6 +346,7 @@ export default function App() {
       if (abort.signal.aborted || !completion.result) return;
       setResult(completion.result);
       setPlan(completion.result.plan);
+      setCurrentRefinement(refinement || null);
       setSearchHistory([
         ...(refinement?.history || []),
         searchRound(completion.result, refinement?.instructions || null),
@@ -388,6 +394,68 @@ export default function App() {
       return;
     }
     void runSearch(result.query, { instructions, history: searchHistory });
+  }
+
+  async function loadMore() {
+    if (!result?.pagination || busy || controller.current) return;
+    if (config?.accessProtected && !accessToken.trim()) {
+      setPageError(
+        'Enter your deployment access token below the search field.',
+      );
+      return;
+    }
+    const abort = new AbortController();
+    controller.current = abort;
+    setBusy(true);
+    setLoadingMore(true);
+    setPageError('');
+    const completion: { result?: SearchResult } = {};
+    try {
+      await streamSearch(
+        {
+          query: result.query,
+          pagination: result.pagination,
+          ...(currentRefinement ? { refinement: currentRefinement } : {}),
+        },
+        accessToken.trim(),
+        abort.signal,
+        (event) => {
+          if (abort.signal.aborted) return;
+          if (event.type === 'phase') setPhase(event.message);
+          if (event.type === 'result') completion.result = event.result;
+        },
+      );
+      if (abort.signal.aborted || !completion.result) return;
+      const merged = mergeSearchResults(result, completion.result);
+      setResult(merged);
+      setSearchHistory((history) =>
+        history.map((round, index) =>
+          index === history.length - 1
+            ? searchRound(merged, round.instructions)
+            : round,
+        ),
+      );
+      const added = merged.papers.length - result.papers.length;
+      notify(
+        added
+          ? `Loaded ${added} more ${added === 1 ? 'paper' : 'papers'}.`
+          : 'No new papers in this batch.',
+      );
+    } catch (err) {
+      if (!abort.signal.aborted)
+        setPageError(
+          err instanceof Error
+            ? err.message
+            : 'More papers could not be loaded. Please try again.',
+        );
+    } finally {
+      if (controller.current === abort) {
+        controller.current = null;
+        setBusy(false);
+        setLoadingMore(false);
+        setPhase('');
+      }
+    }
   }
   function changeTab(nextTab: 'discover' | 'saved') {
     setTab(nextTab);
@@ -592,7 +660,12 @@ export default function App() {
         {busy && (
           <div className="progress" role="status">
             <LoaderCircle size={18} className="spinning" />
-            <span>{phase || 'Starting your search…'}</span>
+            <span>
+              {phase ||
+                (loadingMore
+                  ? 'Loading more papers…'
+                  : 'Starting your search…')}
+            </span>
             <span className="progress-note">Following the evidence</span>
           </div>
         )}
@@ -631,7 +704,9 @@ export default function App() {
                       {result!.retrieved} unique papers retrieved ·{' '}
                       {result!.ranking === 'jev'
                         ? 'Jev relevance order'
-                        : 'OpenAlex order across search paths'}{' '}
+                        : result!.ranking === 'mixed'
+                          ? 'Relevance estimates where available'
+                          : 'OpenAlex order across search paths'}{' '}
                       · {(result!.elapsedMs / 1000).toFixed(1)}s
                     </p>
                   </>
@@ -728,7 +803,7 @@ export default function App() {
                     </ol>
                   </details>
                   <div className="refinement-actions">
-                    {busy && (
+                    {busy && !loadingMore && (
                       <button
                         type="button"
                         className="text-button"
@@ -746,8 +821,10 @@ export default function App() {
                         searchHistory.length >= MAX_SEARCH_ROUNDS
                       }
                     >
-                      {busy ? 'Refining…' : 'Refine this search'}
-                      {busy ? (
+                      {busy && !loadingMore
+                        ? 'Refining…'
+                        : 'Refine this search'}
+                      {busy && !loadingMore ? (
                         <LoaderCircle size={17} className="spinning" />
                       ) : (
                         <ArrowRight size={17} />
@@ -759,7 +836,7 @@ export default function App() {
             )}
             <div className="results-toolbar">
               <div>
-                {tab === 'discover' && result?.ranking === 'jev' ? (
+                {tab === 'discover' && result?.ranking !== 'openalex' ? (
                   <label className="close-filter">
                     <input
                       type="checkbox"
@@ -832,12 +909,58 @@ export default function App() {
                 )}
               </div>
             )}
-            {result?.ranking === 'jev' && tab === 'discover' && (
+            {result?.ranking !== 'openalex' && tab === 'discover' && (
               <p className="evidence-note">
                 Relevance scores estimate a match to your question from
                 metadata. They do not assess study quality or verify findings.
                 The 70% filter is a starting point.
+                {result?.ranking === 'mixed' &&
+                  ' Papers without a relevance estimate are excluded by the close-match filter.'}
               </p>
+            )}
+            {tab === 'discover' && result && (
+              <>
+                {pageError && (
+                  <div className="message error" role="alert">
+                    {pageError}
+                  </div>
+                )}
+                {(result.pagination || result.papers.length > 0) && (
+                  <div className="load-more-panel">
+                    <p>
+                      {result.pagination
+                        ? 'Keep exploring these search paths. New papers will be added to the results above.'
+                        : 'You’ve reached the end of these search paths.'}
+                    </p>
+                    {result.pagination && (
+                      <div className="load-more-actions">
+                        {loadingMore && (
+                          <button
+                            className="text-button"
+                            onClick={cancelSearch}
+                          >
+                            Cancel
+                          </button>
+                        )}
+                        <button
+                          className="search-submit"
+                          disabled={busy}
+                          onClick={() => void loadMore()}
+                        >
+                          {loadingMore
+                            ? 'Loading more papers…'
+                            : 'Load more papers'}
+                          {loadingMore ? (
+                            <LoaderCircle size={17} className="spinning" />
+                          ) : (
+                            <ArrowRight size={17} />
+                          )}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </>
             )}
           </section>
         )}

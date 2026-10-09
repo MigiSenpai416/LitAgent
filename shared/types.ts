@@ -25,6 +25,12 @@ export interface SearchRefinement {
 export interface SearchRequest {
   query: string;
   refinement?: SearchRefinement;
+  pagination?: SearchPagination;
+}
+
+export interface SearchPagination {
+  plan: SearchPlan;
+  paths: { query: string; cursor: string }[];
 }
 
 export interface Paper {
@@ -49,9 +55,10 @@ export interface SearchResult {
   papers: Paper[];
   retrieved: number;
   queriesSearched: string[];
-  ranking: 'jev' | 'openalex';
+  ranking: 'jev' | 'openalex' | 'mixed';
   warnings: string[];
   elapsedMs: number;
+  pagination?: SearchPagination | null;
 }
 
 export type SearchEvent =

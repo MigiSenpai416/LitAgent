@@ -1,4 +1,27 @@
 import type { SearchResult, SearchRound } from '../shared/types';
+import { deduplicatePapers } from '../shared/papers';
+
+export function mergeSearchResults(
+  previous: SearchResult,
+  next: SearchResult,
+): SearchResult {
+  const papers = deduplicatePapers([...previous.papers, ...next.papers]);
+  const scored = papers.filter((paper) => paper.score !== null).length;
+  const ranking =
+    scored === 0 ? 'openalex' : scored === papers.length ? 'jev' : 'mixed';
+  if (scored) papers.sort((a, b) => (b.score ?? -1) - (a.score ?? -1));
+  return {
+    ...next,
+    papers,
+    retrieved: papers.length,
+    queriesSearched: [
+      ...new Set([...previous.queriesSearched, ...next.queriesSearched]),
+    ],
+    ranking,
+    warnings: [...new Set([...previous.warnings, ...next.warnings])],
+    elapsedMs: previous.elapsedMs + next.elapsedMs,
+  };
+}
 
 export function searchRound(
   result: SearchResult,
